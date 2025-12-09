@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 from chatbot import create_customer, get_customer_by_cid, MasterAgent
 import time
@@ -6,7 +5,7 @@ import os
 
 st.set_page_config(page_title="Tata Loan Assistant", layout="centered")
 
-# --- init session state ---
+# --- Init session state ---
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "show_signup" not in st.session_state:
@@ -19,10 +18,10 @@ if "_last_processed_input" not in st.session_state:
     st.session_state._last_processed_input = None
 if "_last_input_time" not in st.session_state:
     st.session_state._last_input_time = 0.0
-if "_download_placeholder" not in st.session_state:
-    st.session_state._download_placeholder = None
+if "processing" not in st.session_state:
+    st.session_state.processing = False
 
-# ---------- helpers ----------
+# ---------- Helpers ----------
 def header():
     st.markdown("## 🏦 Tata Capital Loan Assistant")
     st.markdown("---")
@@ -33,7 +32,7 @@ def append_user(msg):
 def append_bot(msg):
     st.session_state.chat_history.append(("bot", msg))
 
-# ---------- pages ----------
+# ---------- Pages ----------
 def login_page():
     header()
     if st.session_state.logged_in:
@@ -52,6 +51,9 @@ def login_page():
                 st.session_state.customer_id = cid
                 st.session_state.agent = MasterAgent(cid)
                 st.session_state.chat_history = [("bot", st.session_state.agent.start_chat())]
+                st.session_state._last_processed_input = None
+                st.session_state._last_input_time = 0.0
+                st.session_state.processing = False
                 st.success("Logged in")
                 st.rerun()
             else:
@@ -92,59 +94,73 @@ def chat_page():
         st.error("Agent not configured — please log in again.")
         return
 
-    # show chat history
+    # Show chat history
     for sender, msg in st.session_state.chat_history:
         if sender == "bot":
-            st.chat_message("assistant").write(msg)
+            st.chat_message("assistant").markdown(msg)
         else:
             st.chat_message("user").write(msg)
 
-    if st.session_state._download_placeholder is None:
-        st.session_state._download_placeholder = st.empty()
+    # ✅ PDF Download Button - Shows when available
+    agent = st.session_state.agent
+    if getattr(agent, "last_sanction_path", None):
+        pdf_path = agent.last_sanction_path
+        try:
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+            st.markdown("---")
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown("**🎉 Download your sanction letter below:**")
+            with col2:
+                st.download_button(
+                    label=f"📄 Download PDF",
+                    data=pdf_bytes,
+                    file_name=os.path.basename(pdf_path),
+                    mime="application/pdf"
+                )
+            st.markdown("---")
+        except Exception as e:
+            st.error(f"PDF Error: {e}")
+        agent.last_sanction_path = None
 
-    user_msg = st.chat_input("Type your message here...", key="main_chat_input")
+    # Processing flag prevents duplicates
+    if st.session_state.processing:
+        st.info("🤖 Processing your message...")
+        st.chat_input(disabled=True, label_visibility="collapsed")
+    else:
+        user_msg = st.chat_input("Type your message here...")
 
-    if user_msg:
-        now = time.time()
-        last_text = st.session_state._last_processed_input
-        last_time = st.session_state._last_input_time
+        if user_msg:
+            if user_msg != st.session_state._last_processed_input:
+                st.session_state.processing = True
+                st.session_state._last_processed_input = user_msg
+                
+                # Show user message
+                append_user(user_msg)
+                st.chat_message("user").write(user_msg)
+                
+                # Bot response
+                with st.chat_message("assistant"):
+                    with st.spinner("Tata Capital is processing..."):
+                        reply = st.session_state.agent.reply(user_msg)
+                        st.markdown(reply)
+                        append_bot(reply)
+                
+                st.session_state.processing = False
+                st.rerun()
 
-        if user_msg == last_text and (now - last_time) < 0.8:
-            append_bot("You already sent that message — please continue.")
-        else:
-            append_user(user_msg)
-            agent = st.session_state.agent
-            reply = agent.reply(user_msg)
-            append_bot(reply)
-            st.session_state._last_processed_input = user_msg
-            st.session_state._last_input_time = now
-
-            # handle PDF download
-            if getattr(agent, "last_sanction_path", None):
-                pdf_path = agent.last_sanction_path
-                try:
-                    with open(pdf_path, "rb") as f:
-                        pdf_bytes = f.read()
-                    with st.session_state._download_placeholder:
-                        st.download_button(
-                            label="Download Sanction Letter 📄",
-                            data=pdf_bytes,
-                            file_name=os.path.basename(pdf_path),
-                            mime="application/pdf"
-                        )
-                except Exception as e:
-                    append_bot(f"(Error showing PDF: {e})")
-                agent.last_sanction_path = None
-
-    if st.button("Logout"):
+    if st.button("Logout", type="secondary"):
         st.session_state.logged_in = False
         st.session_state.show_signup = False
         st.session_state.chat_history = []
         st.session_state.agent = None
+        st.session_state._last_processed_input = None
+        st.session_state.processing = False
         st.success("Logged out")
         st.rerun()
 
-# ---------- router ----------
+# ---------- Router ----------
 def main():
     if st.session_state.logged_in:
         chat_page()
