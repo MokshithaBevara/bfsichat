@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BFSI Chatbot</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f2f2f2;
+            margin: 0;
+            padding: 0;
+        }
+
+        .chat-container {
+            width: 400px;
+            margin: 40px auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+        }
+
+        #chat-box {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+        }
+
+        .msg {
+            margin: 10px 0;
+            padding: 8px;
+            border-radius: 5px;
+        }
+
+        .bot {
+            background: #e0e0ff;
+            text-align: left;
+        }
+
+        .user {
+            background: #d2ffd2;
+            text-align: right;
+        }
+
+        .input-container {
+            margin-top: 10px;
+            display: flex;
+        }
+
+        #user-input {
+            flex: 1;
+            padding: 10px;
+        }
+
+        button {
+            padding: 10px 15px;
+            margin-left: 5px;
+            cursor: pointer;
+            background: #4a69bd;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="chat-container">
+    <h2>BFSI Chatbot</h2>
+
+    <div id="chat-box"></div>
+
+    <div class="input-container">
+        <input type="text" id="user-input" placeholder="Type your message..." />
+        <button onclick="sendMessage()">Send</button>
+    </div>
+</div>
+
+<script src="script.js"></script>
+
+</body>
+</html>
