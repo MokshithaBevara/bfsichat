@@ -1,4 +1,3 @@
-# chatbot.py
 import csv
 import os
 import random
@@ -47,39 +46,33 @@ def get_customer_by_cid(cid):
 
 # ------------------ Master Agent ------------------
 class MasterAgent:
-    """
-    Deterministic FSM for loan flow:
-    idle -> ask_amount -> ask_tenure -> ask_name -> ask_dob -> ask_id -> ask_income -> ask_employment -> ask_existing_emi -> confirm -> sanction
-    """
     def __init__(self, cid):
         self.cid = cid
         self.state = "idle"
         self.temp = {}
         self.last_sanction_path = None
 
-    # Start chat
     def start_chat(self):
         self.state = "idle"
         self.temp = {}
         self.last_sanction_path = None
-        return "Hello! I'm your Tata Capital Loan Assistant. Type 'Apply loan' to begin or 'Check eligibility'."
+        return "Hello! I'm your Tata Capital Loan Assistant. Type **'Apply loan'** to begin or **'Check eligibility'**."
 
-    # Main reply function
     def reply(self, message):
-        text = str(message).strip()
+        text = str(message).strip().lower()
 
         # Quick commands
-        if text.lower() in ("offers", "show offers", "discounts"):
+        if text in ("offers", "show offers", "discounts"):
             return self._show_offers()
-        if self.state == "idle" and "elig" in text.lower():
+        if self.state == "idle" and "elig" in text:
             return self._quick_eligibility()
 
         # Idle state
         if self.state == "idle":
-            if "apply" in text.lower():
+            if any(word in text for word in ["apply", "loan", "start"]):
                 self.state = "ask_amount"
                 return "Sure — what loan amount do you need?"
-            return "Type 'Apply loan' to start or 'Check eligibility'."
+            return "Type **'Apply loan'** to start or **'Check eligibility'**."
 
         # Ask loan amount
         if self.state == "ask_amount":
@@ -90,7 +83,6 @@ class MasterAgent:
             self.state = "ask_tenure"
             return "Enter tenure in months (6–84)."
 
-        # Ask tenure
         if self.state == "ask_tenure":
             months = self._parse_number(text)
             if months is None:
@@ -102,15 +94,13 @@ class MasterAgent:
             self.state = "ask_name"
             return "Enter your Full Name (as per KYC)."
 
-        # Ask full name
         if self.state == "ask_name":
             if not re.search(r"[A-Za-z]", text):
                 return "Name seems invalid — enter your Full Name."
-            self.temp["full_name"] = text
+            self.temp["full_name"] = text.title()
             self.state = "ask_dob"
             return "Enter Date of Birth (DD-MM-YYYY)."
 
-        # Ask DOB
         if self.state == "ask_dob":
             try:
                 dt = datetime.strptime(text, "%d-%m-%Y")
@@ -122,7 +112,6 @@ class MasterAgent:
             self.state = "ask_id"
             return "Enter PAN or Aadhaar number."
 
-        # Ask ID
         if self.state == "ask_id":
             if len(text) < 6:
                 return "Enter valid PAN/Aadhaar (at least 6 chars)."
@@ -130,28 +119,24 @@ class MasterAgent:
             self.state = "ask_income"
             return "Enter monthly income."
 
-        # Ask income
         if self.state == "ask_income":
             inc = self._parse_number(text)
             if inc is None or inc <= 0:
                 return "Enter monthly income as a number."
             self.temp["income"] = float(inc)
             self.state = "ask_employment"
-            return "Employment Type? (Salaried / Self-Employed)"
+            return "Employment Type? (**Salaried** / **Self-Employed**)"
 
-        # Ask employment
         if self.state == "ask_employment":
-            low = text.lower()
-            if "salar" in low:
+            if "salar" in text:
                 self.temp["employment"] = "Salaried"
-            elif "self" in low:
+            elif "self" in text:
                 self.temp["employment"] = "Self-Employed"
             else:
-                return "Please reply 'Salaried' or 'Self-Employed'."
+                return "Please reply **'Salaried'** or **'Self-Employed'**."
             self.state = "ask_existing_emi"
             return "Existing EMI (0 if none)?"
 
-        # Ask existing EMI
         if self.state == "ask_existing_emi":
             emi = self._parse_number(text)
             if emi is None or emi < 0:
@@ -159,16 +144,29 @@ class MasterAgent:
             self.temp["existing_emi"] = float(emi)
             return self._final_check()
 
-        # Confirm sanction
         if self.state == "confirm":
-            if text.lower() in ("yes", "y"):
+            if text in ("yes", "y"):
                 return self._do_sanction()
             else:
                 self.state = "idle"
                 self.temp = {}
-                return "Application cancelled."
+                return "❌ Application cancelled."
 
         return "I didn't understand. Please follow the prompts."
+
+    def _do_sanction(self):
+        master = get_customer_by_cid(self.cid)
+        if not master:
+            self.state = "idle"
+            return "Master profile missing."
+
+        pdf_path = generate_sanction_pdf(master, self.temp, self.temp["loan_amount"], self.temp["tenure"], self.temp["emi"])
+        self.last_sanction_path = pdf_path
+        
+        pdf_filename = os.path.basename(pdf_path)
+        self.state = "idle"
+        self.temp = {}
+        return f"🎉 **Loan sanctioned successfully!**\n\n**📄 {pdf_filename}**\n\n**Download button appears below the chat!**\n\nThank you for choosing Tata Capital! 🎊"
 
     # ---------- Helpers ----------
     def _parse_number(self, txt):
@@ -185,7 +183,7 @@ class MasterAgent:
         if not c:
             return "No profile found. Signup first."
         limit = c["income"] * 12
-        return f"Credit score: {c['credit_score']} • Approx pre-approved: INR {limit:.0f}"
+        return f"✅ **Credit score**: {c['credit_score']}\n💰 **Pre-approved**: INR {limit:,.0f}"
 
     def _compute_emi(self, principal, months, rate=11.0):
         r = rate / 100 / 12
@@ -207,33 +205,24 @@ class MasterAgent:
         if score < 700:
             self.state = "idle"
             self.temp = {}
-            return f"Loan rejected: credit score {score} below minimum."
+            return f"❌ **Loan rejected**: credit score {score} below minimum."
 
         if emi > allowed:
             self.state = "idle"
             self.temp = {}
-            return f"Loan rejected: EMI {emi:.0f} exceeds allowed {allowed:.0f}."
+            return f"❌ **Loan rejected**: EMI ₹{emi:.0f} exceeds allowed ₹{allowed:.0f}."
 
         self.temp["emi"] = emi
         self.state = "confirm"
         return (
-            f"Eligible!\nLoan: INR {loan:.0f}\nTenure: {months} months\n"
-            f"Estimated EMI: INR {emi:.0f}\nCredit score: {score}\n"
-            "Do you want to proceed? (yes/no)"
+            f"✅ **Eligible for loan!**\n\n"
+            f"💰 **Loan**: INR {loan:,.0f}\n"
+            f"📅 **Tenure**: {months} months\n"
+            f"💳 **EMI**: INR {emi:,.0f}\n"
+            f"⭐ **Credit score**: {score}\n\n"
+            f"**Do you want to proceed?** (yes/no)"
         )
 
-    def _do_sanction(self):
-        master = get_customer_by_cid(self.cid)
-        if not master:
-            self.state = "idle"
-            return "Master profile missing."
-
-        pdf_path = generate_sanction_pdf(master, self.temp, self.temp["loan_amount"], self.temp["tenure"], self.temp["emi"])
-        self.last_sanction_path = pdf_path
-        self.state = "idle"
-        self.temp = {}
-        return f"🎉 Loan sanctioned! Download: {os.path.basename(pdf_path)}"
-
     def _show_offers(self):
-        return "Offers: Personal Loan @11% p.a. / Women special -0.5% / Fee discount above 300k"
+        return "🔥 **Current Offers**:\n• Personal Loan @11% p.a.\n• Women special -0.5%\n• Fee discount above ₹300k"
 
