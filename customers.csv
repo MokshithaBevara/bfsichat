@@ -1,0 +1,11 @@
+customer_id,name,password,monthly_income,age,employment_type,existing_emi,credit_score
+100001,Harini,harini123,42000,23,Salaried,0,715
+100002,Rahul,rahul@123,51000,25,Salaried,2000,730
+100003,Kavya,kavya321,38000,22,Self-Employed,0,690
+100004,Manish,manish@007,62000,28,Salaried,3500,745
+100005,Nisha,nisha1234,45000,24,Salaried,0,700
+100006,Vikram,vikram321,54000,29,Self-Employed,1500,720
+100007,Anjali,anjali@123,37000,22,Salaried,0,680
+100008,Sameer,sameer111,48000,26,Salaried,1000,710
+100009,Divya,divya999,52000,27,Self-Employed,0,735
+100010,Arjun,arjun@321,60000,30,Salaried,4000,750
