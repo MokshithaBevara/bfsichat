@@ -22,3 +22,4 @@ function sendMessage() {
         addMessage("Thanks! Your message was: " + text, "bot");
     }, 500);
 }
+
