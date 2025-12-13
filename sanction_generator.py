@@ -66,4 +66,3 @@ def generate_sanction_pdf(customer, kyc_info, loan_amount, tenure_months, emi):
 
     pdf.output(full_path)
     return full_path
-

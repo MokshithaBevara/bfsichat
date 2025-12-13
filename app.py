@@ -1,25 +1,26 @@
+# app.py (UPDATED: Signup & Login show Customer ID; Go to Chat click required)
 import streamlit as st
 from chatbot import create_customer, get_customer_by_cid, MasterAgent
-import time
 import os
 
 st.set_page_config(page_title="Tata Loan Assistant", layout="centered")
 
 # --- Init session state ---
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "show_signup" not in st.session_state:
-    st.session_state.show_signup = False
-if "agent" not in st.session_state:
-    st.session_state.agent = None
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "_last_processed_input" not in st.session_state:
-    st.session_state._last_processed_input = None
-if "_last_input_time" not in st.session_state:
-    st.session_state._last_input_time = 0.0
-if "processing" not in st.session_state:
-    st.session_state.processing = False
+for key, default in {
+    "logged_in": False,
+    "show_signup": False,
+    "agent": None,
+    "chat_history": [],
+    "_last_processed_input": None,
+    "_last_input_time": 0.0,
+    "processing": False,
+    "awaiting_upload": False,
+    "customer_id": None,
+    "show_chat_button": False,
+    "signup_success": None
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default
 
 # ---------- Helpers ----------
 def header():
@@ -35,9 +36,11 @@ def append_bot(msg):
 # ---------- Pages ----------
 def login_page():
     header()
-    if st.session_state.logged_in:
-        chat_page()
-        return
+
+    # Show signup success message if coming from signup
+    if st.session_state.signup_success:
+        st.success(f"Account created successfully! Customer ID: {st.session_state.signup_success}")
+        st.session_state.signup_success = None
 
     cid = st.text_input("Customer ID", key="login_cid")
     pwd = st.text_input("Password", type="password", key="login_pwd")
@@ -52,19 +55,25 @@ def login_page():
                 st.session_state.agent = MasterAgent(cid)
                 st.session_state.chat_history = [("bot", st.session_state.agent.start_chat())]
                 st.session_state._last_processed_input = None
-                st.session_state._last_input_time = 0.0
                 st.session_state.processing = False
-                st.success("Logged in")
-                st.rerun()
+                st.session_state.awaiting_upload = False
+                st.session_state.show_chat_button = True
+                st.success(f"Logged in successfully! Customer ID: {cid}")  # Show Customer ID
             else:
                 st.error("Invalid credentials")
     with col2:
         if st.button("Create New Account"):
             st.session_state.show_signup = True
-            st.rerun()
+            st.rerun()  # use st.rerun() here
 
     if st.session_state.show_signup:
         signup_page()
+
+    # Show "Go to Chat" button only after successful login
+    if st.session_state.show_chat_button:
+        if st.button("Go to Chat"):
+            st.session_state.show_chat_button = False
+            chat_page()
 
 def signup_page():
     header()
@@ -80,9 +89,9 @@ def signup_page():
             st.error("Enter name and password")
         else:
             cid = create_customer(name, pwd, income, age, emp)
-            st.success(f"Account created. Customer ID: {cid}")
+            st.session_state.signup_success = cid  # Store success message
             st.session_state.show_signup = False
-            st.rerun()
+            st.rerun()  # <-- replaced experimental_rerun
 
     if st.button("Back to Login"):
         st.session_state.show_signup = False
@@ -90,9 +99,8 @@ def signup_page():
 
 def chat_page():
     header()
-    if st.session_state.agent is None:
-        st.error("Agent not configured — please log in again.")
-        return
+    st.markdown(f"**Logged in as Customer ID:** {st.session_state.customer_id}")  # Show customer ID
+    agent = st.session_state.agent
 
     # Show chat history
     for sender, msg in st.session_state.chat_history:
@@ -101,68 +109,82 @@ def chat_page():
         else:
             st.chat_message("user").write(msg)
 
-    # ✅ PDF Download Button - Shows when available
-    agent = st.session_state.agent
-    if getattr(agent, "last_sanction_path", None):
+    # --- PDF Download ---
+    if agent.last_sanction_path:
         pdf_path = agent.last_sanction_path
-        try:
-            with open(pdf_path, "rb") as f:
-                pdf_bytes = f.read()
-            st.markdown("---")
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.markdown("**🎉 Download your sanction letter below:**")
-            with col2:
-                st.download_button(
-                    label=f"📄 Download PDF",
-                    data=pdf_bytes,
-                    file_name=os.path.basename(pdf_path),
-                    mime="application/pdf"
-                )
-            st.markdown("---")
-        except Exception as e:
-            st.error(f"PDF Error: {e}")
+        with open(pdf_path, "rb") as f:
+            pdf_bytes = f.read()
+        st.download_button(
+            label="📄 Download Sanction Letter",
+            data=pdf_bytes,
+            file_name=os.path.basename(pdf_path),
+            mime="application/pdf",
+        )
         agent.last_sanction_path = None
 
-    # Processing flag prevents duplicates
+    # --- Show salary slip uploader when needed ---
+    if agent.state == "await_salary_upload":
+        st.session_state.awaiting_upload = True
+
+    # --- Upload UI ---
+    if st.session_state.awaiting_upload:
+        st.info("📤 Please upload your salary slip (PDF/JPG/PNG).")
+        uploaded_file = st.file_uploader(
+            "Upload salary slip",
+            type=["pdf", "jpg", "jpeg", "png"]
+        )
+
+        if uploaded_file is not None:
+            file_bytes = uploaded_file.read()
+            filename = uploaded_file.name
+
+            with st.chat_message("assistant"):
+                with st.spinner("Verifying salary slip..."):
+                    reply = agent.process_salary_upload(file_bytes, filename)
+                    st.markdown(reply)
+                    append_bot(reply)
+
+            st.session_state.awaiting_upload = (agent.state == "await_salary_upload")
+            st.rerun()
+
+        st.chat_input(disabled=True)
+        if st.button("Cancel Upload"):
+            st.session_state.awaiting_upload = False
+            agent.state = "idle"
+            st.rerun()
+        return
+
+    # --- Normal chat input ---
     if st.session_state.processing:
-        st.info("🤖 Processing your message...")
-        st.chat_input(disabled=True, label_visibility="collapsed")
+        st.info("🤖 Processing your message…")
+        st.chat_input(disabled=True)
     else:
-        user_msg = st.chat_input("Type your message here...")
-
+        user_msg = st.chat_input("Type here…")
         if user_msg:
-            if user_msg != st.session_state._last_processed_input:
-                st.session_state.processing = True
-                st.session_state._last_processed_input = user_msg
-                
-                # Show user message
-                append_user(user_msg)
-                st.chat_message("user").write(user_msg)
-                
-                # Bot response
-                with st.chat_message("assistant"):
-                    with st.spinner("Tata Capital is processing..."):
-                        reply = st.session_state.agent.reply(user_msg)
-                        st.markdown(reply)
-                        append_bot(reply)
-                
-                st.session_state.processing = False
-                st.rerun()
+            st.session_state.processing = True
+            append_user(user_msg)
+            st.chat_message("user").write(user_msg)
 
-    if st.button("Logout", type="secondary"):
+            with st.chat_message("assistant"):
+                with st.spinner("Tata Capital is processing…"):
+                    reply = agent.reply(user_msg)
+                    st.markdown(reply)
+                    append_bot(reply)
+
+            st.session_state.processing = False
+            st.rerun()
+
+    if st.button("Logout"):
         st.session_state.logged_in = False
-        st.session_state.show_signup = False
-        st.session_state.chat_history = []
         st.session_state.agent = None
-        st.session_state._last_processed_input = None
-        st.session_state.processing = False
-        st.success("Logged out")
+        st.session_state.chat_history = []
+        st.session_state.customer_id = None
+        st.session_state.show_chat_button = False
         st.rerun()
 
 # ---------- Router ----------
 def main():
-    if st.session_state.logged_in:
+    if st.session_state.logged_in and not st.session_state.show_chat_button:
         chat_page()
     elif st.session_state.show_signup:
         signup_page()
@@ -171,4 +193,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
