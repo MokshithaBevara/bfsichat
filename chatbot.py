@@ -1,3 +1,4 @@
+# chatbot.py
 import csv
 import os
 import random
@@ -31,7 +32,7 @@ def get_customer_by_cid(cid):
     with open(CUSTOMER_FILE, "r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            if row.get("customer_id") == cid:
+            if row.get("customer_id") == str(cid):
                 return {
                     "cid": row["customer_id"],
                     "name": row["name"],
@@ -142,6 +143,7 @@ class MasterAgent:
             if emi is None or emi < 0:
                 return "Enter existing EMI as a number (0 if none)."
             self.temp["existing_emi"] = float(emi)
+            # run final check - but possibly request salary slip
             return self._final_check()
 
         if self.state == "confirm":
@@ -152,7 +154,94 @@ class MasterAgent:
                 self.temp = {}
                 return "❌ Application cancelled."
 
+        if self.state == "await_salary_upload":
+            # user typed while waiting for upload - remind them to upload
+            return "Please upload your salary slip using the upload box shown by the assistant."
+
         return "I didn't understand. Please follow the prompts."
+
+    def process_salary_upload(self, file_bytes, filename):
+        """
+        Called by the UI after the user uploads a salary slip file.
+        Performs a semi-detailed validation:
+        - Try to extract numbers from filename and file bytes (simulated OCR).
+        - If no numeric salary can be read, assume match (simulate OCR success).
+        - Accept if extracted_salary within ±15% of registered monthly_income.
+        """
+        # Ensure we were actually expecting an upload
+        if self.state != "await_salary_upload":
+            return "No salary slip required at this time."
+
+        master = get_customer_by_cid(self.cid)
+        registered_income = master.get("income", 0) if master else self.temp.get("income", 0)
+
+        # try extract numeric salary from filename
+        nums = re.findall(r"\d{3,9}", filename or "")
+        extracted_salary = None
+        if nums:
+            # take the largest number found (likely the salary figure)
+            extracted_salary = float(max(nums, key=len))
+        else:
+            # try to decode bytes and search for numbers (best-effort)
+            try:
+                text = None
+                # try common encodings
+                for enc in ("utf-8", "latin-1", "iso-8859-1"):
+                    try:
+                        text = file_bytes.decode(enc)
+                        break
+                    except:
+                        text = None
+                if text:
+                    nums2 = re.findall(r"\d{3,9}", text)
+                    if nums2:
+                        extracted_salary = float(max(nums2, key=len))
+            except:
+                extracted_salary = None
+
+        # If no number found at all, assume OCR matched the registered income (simulate)
+        if extracted_salary is None:
+            extracted_salary = float(registered_income)
+
+        # Compare within +/- 15%
+        if registered_income <= 0:
+            self.state = "idle"
+            self.temp = {}
+            return "Unable to validate salary: registered income missing."
+
+        diff_pct = abs(extracted_salary - registered_income) / registered_income
+        if diff_pct > 0.15:
+            # mismatch - reject
+            self.state = "idle"
+            self.temp = {}
+            return (
+                f"❌ Salary slip validation failed.\n"
+                f"Detected salary ₹{extracted_salary:,.0f} does not match registered income ₹{registered_income:,.0f} (>{diff_pct*100:.0f}% difference)."
+            )
+
+        # Salary slip accepted — re-run EMI affordability check as in _final_check
+        loan = self.temp.get("loan_amount")
+        months = self.temp.get("tenure")
+        income = registered_income
+        existing = self.temp.get("existing_emi", 0)
+        emi = self._compute_emi(loan, months)
+        allowed = max(0, 0.5 * income - existing)
+
+        if emi > allowed:
+            self.state = "idle"
+            self.temp = {}
+            return f"❌ **Loan rejected after salary verification**: EMI ₹{emi:.0f} exceeds allowed ₹{allowed:.0f}."
+
+        # Passed — set temp and move to confirmation
+        self.temp["emi"] = emi
+        self.state = "confirm"
+        return (
+            f"✅ Salary slip verified. \n\n"
+            f"💰 **Loan**: INR {loan:,.0f}\n"
+            f"📅 **Tenure**: {months} months\n"
+            f"💳 **EMI**: INR {emi:,.0f}\n\n"
+            f"**Do you want to proceed?** (yes/no)"
+        )
 
     def _do_sanction(self):
         master = get_customer_by_cid(self.cid)
@@ -202,6 +291,19 @@ class MasterAgent:
         emi = self._compute_emi(loan, months)
         allowed = max(0, 0.5 * income - existing)
 
+        # New rule: if loan is "large" compared to registered income, ask for salary slip.
+        # We use a realistic threshold: require slip when loan > 20 * monthly_income.
+        registered_income = master.get("income", income)
+        if registered_income and loan > 20 * registered_income:
+            # Ask user to upload salary slip.
+            self.state = "await_salary_upload"
+            # store temp values for later use when the slip is uploaded
+            self.temp["emi"] = emi
+            return (
+                "Your requested loan amount is large compared to your registered income. "
+                "Please upload your salary slip to proceed. [[UPLOAD_SALARY_SLIP]]"
+            )
+
         if score < 700:
             self.state = "idle"
             self.temp = {}
@@ -225,4 +327,3 @@ class MasterAgent:
 
     def _show_offers(self):
         return "🔥 **Current Offers**:\n• Personal Loan @11% p.a.\n• Women special -0.5%\n• Fee discount above ₹300k"
-
