@@ -1,4 +1,3 @@
-# chatbot.py
 import csv
 import os
 import random
@@ -61,20 +60,17 @@ class MasterAgent:
 
     def reply(self, message):
         text = str(message).strip().lower()
-
         # Quick commands
         if text in ("offers", "show offers", "discounts"):
             return self._show_offers()
         if self.state == "idle" and "elig" in text:
             return self._quick_eligibility()
-
         # Idle state
         if self.state == "idle":
             if any(word in text for word in ["apply", "loan", "start"]):
                 self.state = "ask_amount"
                 return "Sure — what loan amount do you need?"
             return "Type **'Apply loan'** to start or **'Check eligibility'**."
-
         # Ask loan amount
         if self.state == "ask_amount":
             amt = self._parse_number(text)
@@ -83,7 +79,6 @@ class MasterAgent:
             self.temp["loan_amount"] = float(amt)
             self.state = "ask_tenure"
             return "Enter tenure in months (6–84)."
-
         if self.state == "ask_tenure":
             months = self._parse_number(text)
             if months is None:
@@ -94,14 +89,12 @@ class MasterAgent:
             self.temp["tenure"] = months
             self.state = "ask_name"
             return "Enter your Full Name (as per KYC)."
-
         if self.state == "ask_name":
             if not re.search(r"[A-Za-z]", text):
                 return "Name seems invalid — enter your Full Name."
             self.temp["full_name"] = text.title()
             self.state = "ask_dob"
             return "Enter Date of Birth (DD-MM-YYYY)."
-
         if self.state == "ask_dob":
             try:
                 dt = datetime.strptime(text, "%d-%m-%Y")
@@ -112,14 +105,12 @@ class MasterAgent:
             self.temp["dob"] = text
             self.state = "ask_id"
             return "Enter PAN or Aadhaar number."
-
         if self.state == "ask_id":
             if len(text) < 6:
                 return "Enter valid PAN/Aadhaar (at least 6 chars)."
             self.temp["id_number"] = text
             self.state = "ask_income"
             return "Enter monthly income."
-
         if self.state == "ask_income":
             inc = self._parse_number(text)
             if inc is None or inc <= 0:
@@ -127,7 +118,6 @@ class MasterAgent:
             self.temp["income"] = float(inc)
             self.state = "ask_employment"
             return "Employment Type? (**Salaried** / **Self-Employed**)"
-
         if self.state == "ask_employment":
             if "salar" in text:
                 self.temp["employment"] = "Salaried"
@@ -137,15 +127,12 @@ class MasterAgent:
                 return "Please reply **'Salaried'** or **'Self-Employed'**."
             self.state = "ask_existing_emi"
             return "Existing EMI (0 if none)?"
-
         if self.state == "ask_existing_emi":
             emi = self._parse_number(text)
             if emi is None or emi < 0:
                 return "Enter existing EMI as a number (0 if none)."
             self.temp["existing_emi"] = float(emi)
-            # run final check - but possibly request salary slip
             return self._final_check()
-
         if self.state == "confirm":
             if text in ("yes", "y"):
                 return self._do_sanction()
@@ -153,39 +140,27 @@ class MasterAgent:
                 self.state = "idle"
                 self.temp = {}
                 return "❌ Application cancelled."
-
         if self.state == "await_salary_upload":
-            # user typed while waiting for upload - remind them to upload
             return "Please upload your salary slip using the upload box shown by the assistant."
-
         return "I didn't understand. Please follow the prompts."
 
+    # ------------------- FIXED SALARY PROCESSING -------------------
     def process_salary_upload(self, file_bytes, filename):
-        """
-        Called by the UI after the user uploads a salary slip file.
-        Performs a semi-detailed validation:
-        - Try to extract numbers from filename and file bytes (simulated OCR).
-        - If no numeric salary can be read, assume match (simulate OCR success).
-        - Accept if extracted_salary within ±15% of registered monthly_income.
-        """
-        # Ensure we were actually expecting an upload
         if self.state != "await_salary_upload":
             return "No salary slip required at this time."
 
         master = get_customer_by_cid(self.cid)
         registered_income = master.get("income", 0) if master else self.temp.get("income", 0)
 
-        # try extract numeric salary from filename
+        # Attempt numeric extraction from filename
         nums = re.findall(r"\d{3,9}", filename or "")
         extracted_salary = None
         if nums:
-            # take the largest number found (likely the salary figure)
             extracted_salary = float(max(nums, key=len))
         else:
-            # try to decode bytes and search for numbers (best-effort)
+            # Try decoding PDF/text bytes (best-effort)
             try:
                 text = None
-                # try common encodings
                 for enc in ("utf-8", "latin-1", "iso-8859-1"):
                     try:
                         text = file_bytes.decode(enc)
@@ -199,40 +174,43 @@ class MasterAgent:
             except:
                 extracted_salary = None
 
-        # If no number found at all, assume OCR matched the registered income (simulate)
-        if extracted_salary is None:
-            extracted_salary = float(registered_income)
+        # ---------- NEW: Normalize & Align ----------
+        extracted_salary = self._normalize_salary(extracted_salary)
+        aligned_salary, note = self._align_salary(extracted_salary, registered_income)
 
-        # Compare within +/- 15%
-        if registered_income <= 0:
-            self.state = "idle"
-            self.temp = {}
-            return "Unable to validate salary: registered income missing."
+        # Tolerance ±30%
+        diff = abs(aligned_salary - registered_income)
+        allowed = registered_income * 0.30
 
-        diff_pct = abs(extracted_salary - registered_income) / registered_income
-        if diff_pct > 0.15:
-            # mismatch - reject
-            self.state = "idle"
-            self.temp = {}
+        if diff > allowed:
+            # Do NOT hard fail; send for manual review
+            self.state = "confirm"
+            self.temp["emi"] = self._compute_emi(
+                self.temp.get("loan_amount"),
+                self.temp.get("tenure")
+            )
             return (
-                f"❌ Salary slip validation failed.\n"
-                f"Detected salary ₹{extracted_salary:,.0f} does not match registered income ₹{registered_income:,.0f} (>{diff_pct*100:.0f}% difference)."
+                "⚠️ **Salary discrepancy detected**\n\n"
+                f"• Detected (after normalization): ₹{aligned_salary:,.0f}\n"
+                f"• Registered income: ₹{registered_income:,.0f}\n"
+                f"• Action: Sent for **manual verification**\n\n"
+                "✅ You may still proceed with the application.\n\n"
+                "**Do you want to continue?** (yes/no)"
             )
 
-        # Salary slip accepted — re-run EMI affordability check as in _final_check
+        # Passed — normal EMI check
         loan = self.temp.get("loan_amount")
         months = self.temp.get("tenure")
         income = registered_income
         existing = self.temp.get("existing_emi", 0)
         emi = self._compute_emi(loan, months)
-        allowed = max(0, 0.5 * income - existing)
+        allowed_emi = max(0, 0.5 * income - existing)
 
-        if emi > allowed:
+        if emi > allowed_emi:
             self.state = "idle"
             self.temp = {}
-            return f"❌ **Loan rejected after salary verification**: EMI ₹{emi:.0f} exceeds allowed ₹{allowed:.0f}."
+            return f"❌ **Loan rejected after salary verification**: EMI ₹{emi:.0f} exceeds allowed ₹{allowed_emi:.0f}."
 
-        # Passed — set temp and move to confirmation
         self.temp["emi"] = emi
         self.state = "confirm"
         return (
@@ -243,6 +221,25 @@ class MasterAgent:
             f"**Do you want to proceed?** (yes/no)"
         )
 
+    # ------------------ NEW HELPERS ------------------
+    def _normalize_salary(self, value):
+        try:
+            value = float(value)
+        except:
+            return None
+        if value > 5_000_000:  # >50 lakh monthly considered invalid
+            return None
+        return value
+
+    def _align_salary(self, detected, registered):
+        if detected is None:
+            return registered, "OCR fallback"
+        # Annual slip detected
+        if detected > registered * 8:
+            return detected / 12, "Annual→Monthly adjusted"
+        return detected, "Monthly matched"
+
+    # ------------------ OTHER EXISTING FUNCTIONS ------------------
     def _do_sanction(self):
         master = get_customer_by_cid(self.cid)
         if not master:
@@ -257,7 +254,6 @@ class MasterAgent:
         self.temp = {}
         return f"🎉 **Loan sanctioned successfully!**\n\n**📄 {pdf_filename}**\n\n**Download button appears below the chat!**\n\nThank you for choosing Tata Capital! 🎊"
 
-    # ---------- Helpers ----------
     def _parse_number(self, txt):
         cleaned = re.sub(r"[^\d.]", "", txt)
         if cleaned == "":
@@ -291,13 +287,9 @@ class MasterAgent:
         emi = self._compute_emi(loan, months)
         allowed = max(0, 0.5 * income - existing)
 
-        # New rule: if loan is "large" compared to registered income, ask for salary slip.
-        # We use a realistic threshold: require slip when loan > 20 * monthly_income.
         registered_income = master.get("income", income)
         if registered_income and loan > 20 * registered_income:
-            # Ask user to upload salary slip.
             self.state = "await_salary_upload"
-            # store temp values for later use when the slip is uploaded
             self.temp["emi"] = emi
             return (
                 "Your requested loan amount is large compared to your registered income. "

@@ -1,4 +1,4 @@
-# app.py (UPDATED: Signup & Login show Customer ID; Go to Chat click required)
+# app.py (FIXED: Signup & Login show Customer ID; Go to Chat click; salary warning handled)
 import streamlit as st
 from chatbot import create_customer, get_customer_by_cid, MasterAgent
 import os
@@ -37,7 +37,6 @@ def append_bot(msg):
 def login_page():
     header()
 
-    # Show signup success message if coming from signup
     if st.session_state.signup_success:
         st.success(f"Account created successfully! Customer ID: {st.session_state.signup_success}")
         st.session_state.signup_success = None
@@ -58,13 +57,13 @@ def login_page():
                 st.session_state.processing = False
                 st.session_state.awaiting_upload = False
                 st.session_state.show_chat_button = True
-                st.success(f"Logged in successfully! Customer ID: {cid}")  # Show Customer ID
+                st.success(f"Logged in successfully! Customer ID: {cid}")
             else:
                 st.error("Invalid credentials")
     with col2:
         if st.button("Create New Account"):
             st.session_state.show_signup = True
-            st.rerun()  # use st.rerun() here
+            st.rerun()
 
     if st.session_state.show_signup:
         signup_page()
@@ -89,9 +88,9 @@ def signup_page():
             st.error("Enter name and password")
         else:
             cid = create_customer(name, pwd, income, age, emp)
-            st.session_state.signup_success = cid  # Store success message
+            st.session_state.signup_success = cid
             st.session_state.show_signup = False
-            st.rerun()  # <-- replaced experimental_rerun
+            st.rerun()
 
     if st.button("Back to Login"):
         st.session_state.show_signup = False
@@ -99,7 +98,7 @@ def signup_page():
 
 def chat_page():
     header()
-    st.markdown(f"**Logged in as Customer ID:** {st.session_state.customer_id}")  # Show customer ID
+    st.markdown(f"**Logged in as Customer ID:** {st.session_state.customer_id}")
     agent = st.session_state.agent
 
     # Show chat history
@@ -109,7 +108,7 @@ def chat_page():
         else:
             st.chat_message("user").write(msg)
 
-    # --- PDF Download ---
+    # PDF Download
     if agent.last_sanction_path:
         pdf_path = agent.last_sanction_path
         with open(pdf_path, "rb") as f:
@@ -122,11 +121,10 @@ def chat_page():
         )
         agent.last_sanction_path = None
 
-    # --- Show salary slip uploader when needed ---
+    # Salary slip uploader
     if agent.state == "await_salary_upload":
         st.session_state.awaiting_upload = True
 
-    # --- Upload UI ---
     if st.session_state.awaiting_upload:
         st.info("📤 Please upload your salary slip (PDF/JPG/PNG).")
         uploaded_file = st.file_uploader(
@@ -141,7 +139,11 @@ def chat_page():
             with st.chat_message("assistant"):
                 with st.spinner("Verifying salary slip..."):
                     reply = agent.process_salary_upload(file_bytes, filename)
-                    st.markdown(reply)
+                    # Show warning nicely if salary discrepancy
+                    if "Salary discrepancy detected" in reply:
+                        st.warning(reply)
+                    else:
+                        st.markdown(reply)
                     append_bot(reply)
 
             st.session_state.awaiting_upload = (agent.state == "await_salary_upload")
@@ -154,7 +156,7 @@ def chat_page():
             st.rerun()
         return
 
-    # --- Normal chat input ---
+    # Normal chat input
     if st.session_state.processing:
         st.info("🤖 Processing your message…")
         st.chat_input(disabled=True)
@@ -168,7 +170,11 @@ def chat_page():
             with st.chat_message("assistant"):
                 with st.spinner("Tata Capital is processing…"):
                     reply = agent.reply(user_msg)
-                    st.markdown(reply)
+                    # Show salary discrepancy warning nicely
+                    if "Salary discrepancy detected" in reply:
+                        st.warning(reply)
+                    else:
+                        st.markdown(reply)
                     append_bot(reply)
 
             st.session_state.processing = False
