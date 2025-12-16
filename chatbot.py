@@ -319,3 +319,4 @@ class MasterAgent:
 
     def _show_offers(self):
         return "🔥 **Current Offers**:\n• Personal Loan @11% p.a.\n• Women special -0.5%\n• Fee discount above ₹300k"
+
