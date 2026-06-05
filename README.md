@@ -121,7 +121,7 @@ Contributors:
 * Himaja Ganteda
 * Sowmya Yenugutala
 * Hema Sudarshini
-* Rahul
+* Rahul Taviti
 
 ---
 
