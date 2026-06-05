@@ -82,10 +82,11 @@ User
 ## Demo
 
 Live Application:
-[Add Streamlit Link]
+https://bfsichat-p7jd7mtbcdu5qnjiz3cewx.streamlit.app/
 
 Demo Video:
-[Add YouTube Link]
+
+
 
 ---
 
@@ -93,15 +94,18 @@ Demo Video:
 
 ### Home Page
 
-(Add Screenshot)
+<img width="1446" height="894" alt="Screenshot 2026-06-05 105103" src="https://github.com/user-attachments/assets/9dc1d036-100a-47bc-9cc5-61af5333983e" />
+
 
 ### Chat Interface
 
-(Add Screenshot)
+<img width="1460" height="895" alt="Screenshot 2026-06-05 105010" src="https://github.com/user-attachments/assets/db748b6d-64c6-4dbf-a35e-e9be53138ddb" />
 
-### Sample Banking Query
 
-(Add Screenshot)
+### Sanctioning Loan
+
+<img width="1497" height="902" alt="Screenshot 2026-06-05 104932" src="https://github.com/user-attachments/assets/d4b0ccc6-b6f3-4e9e-af85-40781cec3d30" />
+
 
 ---
 
